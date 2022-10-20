@@ -109,7 +109,7 @@ def get_accuracy_distribution():
 ########################################################
 
 # MNIST dataset
-def load_dataset(path='./DATASETS'):
+def load_dataset(path='../DATASETS'):
 
     # You can change this to include augmention and normalization
 
