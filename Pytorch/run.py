@@ -9,4 +9,4 @@ data_loader = (train_loader, valid_loader)
 nas_object = MLPNAS(data_loader)
 data = nas_object.search()
 
-get_top_n_architectures(TOP_N)
+# get_top_n_architectures(TOP_N)
