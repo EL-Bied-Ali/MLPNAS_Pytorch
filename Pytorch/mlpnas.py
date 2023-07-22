@@ -13,7 +13,6 @@ from torch.utils.data import TensorDataset
 class MLPNAS(Controller):
 
     def __init__(self, data_loader):
-
         self.data_loader = data_loader
         self.target_classes = TARGET_CLASSES
         self.controller_sampling_epochs = CONTROLLER_SAMPLING_EPOCHS
@@ -21,7 +20,7 @@ class MLPNAS(Controller):
         self.controller_train_epochs = CONTROLLER_TRAINING_EPOCHS
         self.architecture_train_epochs = ARCHITECTURE_TRAINING_EPOCHS
         self.controller_loss_alpha = CONTROLLER_LOSS_ALPHA
-        
+
         x = next(iter(data_loader[0]))
         x = torch.as_tensor(x[0])
         self.input_shape = x.shape #included batch_size
@@ -36,10 +35,14 @@ class MLPNAS(Controller):
 
         self.controller_batch_size = len(self.data)
         self.controller_input_shape = (MAX_ARCHITECTURE_LENGTH - 1, 1)
-        # if self.use_predictor:
-        #     self.controller_model = self.hybrid_control_model(self.controller_input_shape, self.controller_batch_size)
-        # else:
         self.controller_model = self.control_model()
+
+        # Create the optimizer object
+        if self.controller_optimizer == 'sgd':
+            self.controller_optimizer = torch.optim.SGD(self.controller_model.parameters(), lr=self.controller_lr, weight_decay=self.controller_decay, momentum=self.controller_momentum)
+        else:
+            self.controller_optimizer = getattr(torch.optim, self.controller_optimizer)(self.controller_model.parameters(), lr=self.controller_lr, weight_decay=self.controller_decay)
+
 
     def create_architecture(self, sequence):
         model = self.model_generator.create_model(sequence, self.input_shape)
@@ -137,25 +140,28 @@ class MLPNAS(Controller):
             print('------------------------------------------------------------------')
             print('                       CONTROLLER EPOCH: {}'.format(controller_epoch))
             print('------------------------------------------------------------------')
-            sequences = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
-            if self.use_predictor:
-                pred_accuracies = self.get_predicted_accuracies_hybrid_model(self.controller_model, sequences)
+            sequences, log_probs = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
+            rewards = []
             for i, sequence in enumerate(sequences):
                 print('Architecture: ', self.decode_sequence(sequence))
                 model = self.create_architecture(sequence)
                 history = self.train_architecture(model)
-                if self.use_predictor:
-                    self.append_model_metrics(sequence, history, pred_accuracies[i])
-                else:
-                    self.append_model_metrics(sequence, history)
+                self.append_model_metrics(sequence, history)
                 print('------------------------------------------------------')
-            
-            train_loader, val_acc_target = self.prepare_controller_data(sequences)
-            
-            self.train_controller(self.controller_model,
-                                  train_loader,
-                                  val_acc_target[-self.samples_per_controller_epoch:])
+                # Get the reward for the action
+                reward = -history['val_accuracy'][-1] # Assuming that the validation accuracy is stored in the 'val_accuracy' key of the history dictionary
+                rewards.append(reward)
+            # Calculate the policy loss
+            policy_loss = []
+            for log_prob, reward in zip(log_probs, rewards):
+                policy_loss.append(-log_prob * reward)
+            policy_loss = torch.stack(policy_loss).sum()
+            # Perform a gradient update
+            self.controller_optimizer.zero_grad()
+            policy_loss.backward()
+            self.controller_optimizer.step()
         with open(self.nas_data_log, 'wb') as f:
             pickle.dump(self.data, f)
         log_event()
         return self.data
+
