@@ -107,7 +107,7 @@ def get_accuracy_distribution():
 ########################################################
 #                   DATASET LOADING                    #
 ########################################################
-
+"""
 # MNIST dataset
 def load_dataset(path='../DATASETS'):
 
@@ -131,3 +131,39 @@ def load_dataset(path='../DATASETS'):
     test_loader = DataLoader(test, batch_size = BATCH_SIZE, shuffle = False)
 
     return train_loader, valid_loader, test_loader
+"""
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+
+# In CONSTANTS.py, add a new constant for the dataset choice
+# DATASET_CHOICE = 'Iris'  # or 'MNIST' or 'CIFAR-10'
+
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, random_split
+
+def load_dataset():
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    if DATASET_CHOICE == 'MNIST':
+        trainset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        testset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+    elif DATASET_CHOICE == 'CIFAR-10':
+        trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+        testset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+    elif DATASET_CHOICE == 'Fashion-MNIST':
+        trainset = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
+        testset = datasets.FashionMNIST(root='./data', train=False, download=True, transform=transform)
+    else:
+        raise ValueError('Invalid dataset choice')
+
+    # Split the training set into a smaller training set and a validation set
+    # Here, we use 80% of the data for training and 20% for validation
+    num_train = len(trainset)
+    num_val = int(0.2 * num_train)
+    num_train = num_train - num_val
+    trainset, valset = random_split(trainset, [num_train, num_val])
+
+    train_loader = DataLoader(trainset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(valset, batch_size=32, shuffle=False)
+    test_loader = DataLoader(testset, batch_size=32, shuffle=False)
+
+    return train_loader, val_loader, test_loader
