@@ -13,6 +13,7 @@ SAMPLES_PER_CONTROLLER_EPOCH = 10
 CONTROLLER_TRAINING_EPOCHS = 10
 ARCHITECTURE_TRAINING_EPOCHS = 10
 CONTROLLER_LOSS_ALPHA = 0.9
+METHOD = 'Vanilla'
 
 ########################################################
 #               CONTROLLER PARAMETERS                  #
@@ -39,6 +40,7 @@ MLP_ONE_SHOT = False
 ########################################################
 #                   DATA PARAMETERS                    #
 ########################################################
+DATASET_CHOICE = 'MNIST'  # or 'CIFAR-10' or 'Fashion-MNIST'
 TARGET_CLASSES = 10
 VALIDATION_SPLIT_RATE = 0.1
 MANUAL_SEED = 1
