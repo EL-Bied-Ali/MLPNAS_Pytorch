@@ -1,10 +1,17 @@
 ########################################################
 #                   NAS PARAMETERS                     #
 ########################################################
+"""
 CONTROLLER_SAMPLING_EPOCHS = 2
-SAMPLES_PER_CONTROLLER_EPOCH = 2
-CONTROLLER_TRAINING_EPOCHS = 1
+SAMPLES_PER_CONTROLLER_EPOCH = 3
+CONTROLLER_TRAINING_EPOCHS = 2
 ARCHITECTURE_TRAINING_EPOCHS = 1
+CONTROLLER_LOSS_ALPHA = 0.9
+"""
+CONTROLLER_SAMPLING_EPOCHS = 10
+SAMPLES_PER_CONTROLLER_EPOCH = 10
+CONTROLLER_TRAINING_EPOCHS = 10
+ARCHITECTURE_TRAINING_EPOCHS = 10
 CONTROLLER_LOSS_ALPHA = 0.9
 
 ########################################################
