@@ -13,7 +13,8 @@ from torch.utils.data import TensorDataset
 class MLPNAS(Controller):
 
     def __init__(self, data_loader):
-        self.data_loader = data_loader
+        self.data_loader = load_dataset()
+        # self.data_loader = data_loader
         self.target_classes = TARGET_CLASSES
         self.controller_sampling_epochs = CONTROLLER_SAMPLING_EPOCHS
         self.samples_per_controller_epoch = SAMPLES_PER_CONTROLLER_EPOCH
@@ -26,8 +27,17 @@ class MLPNAS(Controller):
         self.input_shape = x.shape #included batch_size
 
         self.data = []
-        self.nas_data_log = 'LOGS/nas_data.pkl'
-        clean_log()
+        # Create a new directory for each dataset and method, if it doesn't already exist
+        log_dir = os.path.join('LOGS', DATASET_CHOICE, METHOD)
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Find the next available ID for the log file
+        nas_data_id = 1
+        while os.path.exists(os.path.join(log_dir, f'nas_data_{nas_data_id}.pkl')):
+            nas_data_id += 1
+
+        # Set the log file path
+        self.nas_data_log = os.path.join(log_dir, f'nas_data_{nas_data_id}.pkl')
 
         super().__init__()
 
@@ -43,7 +53,8 @@ class MLPNAS(Controller):
         else:
             self.controller_optimizer = getattr(torch.optim, self.controller_optimizer)(self.controller_model.parameters(), lr=self.controller_lr, weight_decay=self.controller_decay)
 
-
+    
+            
     def create_architecture(self, sequence):
         model = self.model_generator.create_model(sequence, self.input_shape)
         return model
