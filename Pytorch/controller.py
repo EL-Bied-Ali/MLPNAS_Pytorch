@@ -35,35 +35,41 @@ class Controller(MLPSearchSpace):
     def sample_architecture_sequences(self, model, number_of_samples):
         final_layer_id = len(self.vocab)
         dropout_id = final_layer_id - 1
-        # vocab_idx = [0] + list(self.vocab.keys())
         samples = []
+        log_probs = []
         print("GENERATING ARCHITECTURE SAMPLES...")
         print('------------------------------------------------------')
-        #we need to add a rule to limit two or more dropouts consequently!
         while len(samples) < number_of_samples:
             seed = []
+            seed_log_probs = []
             while len(seed) < self.max_len:
                 sequence = self.pad_sequence_torch([seed], max_len = self.max_len - 1)
                 sequence = sequence.reshape(1, self.max_len - 1)
                 probab = model(torch.as_tensor(sequence, dtype=int).to(self.device))
                 probab = probab[0]
                 next = probab.multinomial(1)
+                next_log_prob = torch.log(probab[next])
                 if next == dropout_id and len(seed) == 0:
                     continue
                 if next == final_layer_id and len(seed) == 0:
                     continue
                 if next == final_layer_id:
                     seed.append(next)
+                    seed_log_probs.append(next_log_prob)
                     break
                 if len(seed) == self.max_len - 1:
                     seed.append(final_layer_id)
+                    seed_log_probs.append(next_log_prob)
                     break
                 if not next == 0:
                     seed.append(next)
+                    seed_log_probs.append(next_log_prob)
             if seed not in self.seq_data:
                 samples.append(seed)
+                log_probs.append(torch.stack(seed_log_probs).sum())
                 self.seq_data.append(seed)
-        return samples
+        return samples, log_probs
+
 
     def control_model(self):
         
