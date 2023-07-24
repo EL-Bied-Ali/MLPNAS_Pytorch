@@ -13,7 +13,7 @@ SAMPLES_PER_CONTROLLER_EPOCH = 10
 CONTROLLER_TRAINING_EPOCHS = 10
 ARCHITECTURE_TRAINING_EPOCHS = 10
 CONTROLLER_LOSS_ALPHA = 0.9
-METHOD = 'Vanilla'
+METHOD = 'constant_baseline' # vanilla
 
 ########################################################
 #               CONTROLLER PARAMETERS                  #
