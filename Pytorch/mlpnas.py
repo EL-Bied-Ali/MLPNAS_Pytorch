@@ -167,8 +167,8 @@ class MLPNAS(Controller):
             if METHOD == 'vanilla':
                 for log_prob, reward in zip(log_probs, rewards):
                     policy_loss.append(-log_prob * reward)
-            elif METHOD == 'constant_baseline':
-                baseline = 0.5
+            elif METHOD == 'adaptive_baseline':
+                baseline = np.mean(rewards)
                 for log_prob, reward in zip(log_probs, rewards):
                     policy_loss.append(-log_prob * (reward - baseline))
             policy_loss = torch.stack(policy_loss).sum()
@@ -180,5 +180,6 @@ class MLPNAS(Controller):
             pickle.dump(self.data, f)
         log_event()
         return self.data
+
 
 
