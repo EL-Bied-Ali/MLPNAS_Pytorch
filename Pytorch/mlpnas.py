@@ -64,27 +64,26 @@ class MLPNAS(Controller):
         return history
 
     def append_model_metrics(self, sequence, history, pred_accuracy=None):
+        val_acc = 0
         if len(history['val_accuracy']) == 1:
-            if pred_accuracy:
-                self.data.append([sequence,
-                                  history['val_accuracy'][0],
-                                  pred_accuracy])
-            else:
-                self.data.append([sequence,
-                                  history['val_accuracy'][0]])
-            print('validation accuracy: ', history['val_accuracy'][0])
+            val_acc = history['val_accuracy'][0]
         else:
             val_acc = np.ma.average(history['val_accuracy'],
                                     weights=np.arange(1, len(history['val_accuracy']) + 1),
                                     axis=-1)
-            if pred_accuracy:
-                self.data.append([sequence,
-                                  val_acc,
-                                  pred_accuracy])
-            else:
-                self.data.append([sequence,
-                                  val_acc])
-            print('validation accuracy: ', val_acc)
+        # Get the loss for the architecture
+        loss = history['loss'][-1]  # The loss after the last training epoch
+    
+        # Append the loss to the data
+        if pred_accuracy:
+            self.data.append([sequence, val_acc, pred_accuracy, loss])
+        else:
+            self.data.append([sequence, val_acc, loss])
+    
+        # Save the data to the log file
+        with open(self.nas_data_log, 'wb') as f:
+            pickle.dump(self.data, f)
+
 
     def pad_sequence_torch(self, sequences, max_len):
         
