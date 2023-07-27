@@ -150,7 +150,14 @@ class MLPNAS(Controller):
             print('------------------------------------------------------------------')
             print('                       CONTROLLER EPOCH: {}'.format(controller_epoch))
             print('------------------------------------------------------------------')
-            sequences, log_probs = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
+            if METHOD == 'random_search':
+                # Generate a random architecture sequence
+                sequence = np.random.choice(self.controller_classes, self.max_len)
+                sequences = [sequence]
+                log_probs = [0]  # log_probs is not used in the random search case, but we'll set it to avoid errors later
+            else:
+                # Sample architecture sequences using the controller model
+                sequences, log_probs = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
             rewards = []
             for i, sequence in enumerate(sequences):
                 print('Architecture: ', self.decode_sequence(sequence))
@@ -179,6 +186,7 @@ class MLPNAS(Controller):
             pickle.dump(self.data, f)
         log_event()
         return self.data
+
 
 
 
