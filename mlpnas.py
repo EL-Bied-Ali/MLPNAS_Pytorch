@@ -4,6 +4,7 @@ from controller import Controller
 from mlp_generator import MLPGenerator
 from utils import *
 
+import pickle
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -21,6 +22,16 @@ class MLPNAS(Controller):
         self.controller_train_epochs = CONTROLLER_TRAINING_EPOCHS
         self.architecture_train_epochs = ARCHITECTURE_TRAINING_EPOCHS
         self.controller_loss_alpha = CONTROLLER_LOSS_ALPHA
+        self.weight_sharing = WEIGHT_SHARING
+        self.weight_sharing_threshold = WEIGHT_SHARING_THRESHOLD
+
+        if self.weight_sharing:
+            self.weights_file = 'shared_weights.pkl'
+            if os.path.exists(self.weights_file):
+                with open(self.weights_file, 'rb') as f:
+                    self.shared_weights = pickle.load(f)
+            else:
+                self.shared_weights = {}
 
         x = next(iter(data_loader[0]))
         x = torch.as_tensor(x[0])
@@ -53,15 +64,39 @@ class MLPNAS(Controller):
         else:
             self.controller_optimizer = getattr(torch.optim, self.controller_optimizer)(self.controller_model.parameters(), lr=self.controller_lr, weight_decay=self.controller_decay)
 
+
     
             
     def create_architecture(self, sequence):
         model = self.model_generator.create_model(sequence, self.input_shape)
+
+        if self.weight_sharing:
+            for name, param in model.named_parameters():
+                if name in self.shared_weights:
+                    param.data = self.shared_weights[name]
         return model
+
+
 
     def train_architecture(self, model):
         history = self.model_generator.train_model(model, self.data_loader, self.architecture_train_epochs)
+        print("Validation Accuracy:", history['val_accuracy'][-1]) # Debug print
+        print("Weight Sharing Threshold:", self.weight_sharing_threshold) # Debug print
+        print("Weight Sharing Enabled:", self.weight_sharing) # Debug print
+        if self.weight_sharing and history['val_accuracy'][-1] >= self.weight_sharing_threshold:
+            print("Saving shared weights...") # Debug print
+            for name, param in model.named_parameters():
+                self.shared_weights[name] = param.detach().clone()
+
+            # Save the shared weights to a file
+            with open(self.weights_file, 'wb') as f:
+                pickle.dump(self.shared_weights, f)
+
         return history
+
+
+
+
 
     def append_model_metrics(self, sequence, history, pred_accuracy=None):
         val_acc = 0
@@ -146,18 +181,35 @@ class MLPNAS(Controller):
                                      self.controller_train_epochs)
 
     def search(self):
+        vocab = self.vocab_dict()
+        valid_ids = list(vocab.keys())
+        dropout_id = valid_ids[-2]
+        final_layer_id = valid_ids[-1]
+
         for controller_epoch in range(self.controller_sampling_epochs):
             print('------------------------------------------------------------------')
             print('                       CONTROLLER EPOCH: {}'.format(controller_epoch))
             print('------------------------------------------------------------------')
             if METHOD == 'random_search':
-                # Generate a random architecture sequence
-                sequence = np.random.choice(self.controller_classes, self.max_len)
+                # Generate a random architecture sequence that follows the rules
+                sequence = []
+                while len(sequence) < self.max_len:
+                    next = np.random.choice(valid_ids[:-1])  # Exclude final_layer_id from random choice
+                    if next == dropout_id and len(sequence) == 0:
+                        continue  # Skip if first layer is dropout
+                    sequence.append(next)
+                    if len(sequence) == self.max_len - 1:
+                        sequence.append(final_layer_id)  # Add final layer as the last layer
+                        break
                 sequences = [sequence]
                 log_probs = [0]  # log_probs is not used in the random search case, but we'll set it to avoid errors later
             else:
                 # Sample architecture sequences using the controller model
                 sequences, log_probs = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
+            # Rest of the code...
+
+            # Rest of the code...
+
             rewards = []
             for i, sequence in enumerate(sequences):
                 print('Architecture: ', self.decode_sequence(sequence))
@@ -168,6 +220,8 @@ class MLPNAS(Controller):
                 # Get the reward for the action
                 reward = -history['val_accuracy'][-1] # Assuming that the validation accuracy is stored in the 'val_accuracy' key of the history dictionary
                 rewards.append(reward)
+                if self.weight_sharing and history['val_accuracy'][-1] < WEIGHT_SHARING_THRESHOLD:
+                    continue
             # Calculate the policy loss
             policy_loss = []
             if METHOD == 'vanilla':
@@ -177,11 +231,14 @@ class MLPNAS(Controller):
                 baseline = np.mean(rewards)
                 for log_prob, reward in zip(log_probs, rewards):
                     policy_loss.append(-log_prob * (reward - baseline))
-            policy_loss = torch.stack(policy_loss).sum()
-            # Perform a gradient update
-            self.controller_optimizer.zero_grad()
-            policy_loss.backward()
-            self.controller_optimizer.step()
+            if METHOD != 'random_search':
+                policy_loss = torch.stack(policy_loss).sum()
+                # Perform a gradient update
+                self.controller_optimizer.zero_grad()
+                policy_loss.backward()
+                self.controller_optimizer.step()
+
+
         with open(self.nas_data_log, 'wb') as f:
             pickle.dump(self.data, f)
         log_event()

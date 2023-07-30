@@ -64,7 +64,6 @@ class MLPGenerator(MLPSearchSpace):
         self.mlp_momentum = MLP_MOMENTUM
         self.mlp_dropout = MLP_DROPOUT
         # self.mlp_loss_func = MLP_LOSS_FUNCTION
-        self.mlp_one_shot = MLP_ONE_SHOT
         self.metrics = ['accuracy']
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # print("Target device: " + str(device))
@@ -72,41 +71,48 @@ class MLPGenerator(MLPSearchSpace):
         super().__init__(TARGET_CLASSES)
 
 
-        if self.mlp_one_shot:
-            self.weights_file = 'LOGS/shared_weights.pkl'
-            self.shared_weights = pd.DataFrame({'bigram_id': [], 'weights': []})
-            if not os.path.exists(self.weights_file):
-                print("Initializing shared weights dictionary...")
-                self.shared_weights.to_pickle(self.weights_file)
-
     #creating a Pytorch model
     def create_model(self, sequence, mlp_input_shape):
 
-            layer_configs = self.decode_sequence(sequence)
-            flattened_input_size = [mlp_input_shape[0], reduce((lambda x, y: x * y), mlp_input_shape[1:])] #first element is batch_size so flatten the rest
-        
-            model = nn.Sequential()
+        layer_configs = self.decode_sequence(sequence)
+        flattened_input_size = [mlp_input_shape[0], reduce((lambda x, y: x * y), mlp_input_shape[1:])] #first element is batch_size so flatten the rest
 
-            if len(mlp_input_shape) > 1:
-                for i, layer_conf in enumerate(layer_configs):
-                    if layer_conf == 'dropout':
-                        model.add_module('dropout' + str(i), nn.Dropout(p=self.mlp_dropout))
+        model = nn.Sequential()
+
+        if len(mlp_input_shape) > 1:
+            for i, layer_conf in enumerate(layer_configs):
+                if i == 0 and layer_conf == 'dropout':
+                    continue  # Skip if first layer is dropout
+                if layer_conf == 'dropout':
+                    model.add_module('dropout' + str(i), nn.Dropout(p=self.mlp_dropout))
+                else:
+                    if(i == 0):
+                        model.add_module('linear' + str(i), nn.Linear(flattened_input_size[1], layer_conf[0]))
+                        model.add_module('activation' + str(i), self.activation_dict[layer_conf[1]])
                     else:
-                        if(i == 0):
-                            model.add_module('linear' + str(i), nn.Linear(flattened_input_size[1], layer_conf[0]))
-                            model.add_module('activation' + str(i), self.activation_dict[layer_conf[1]])
+                        if(layer_configs[i-1] == 'dropout'):
+                            prev_layer_conf = layer_configs[i-2]
                         else:
-                            if(layer_configs[i-1] == 'dropout'):
-                                prev_layer_conf = layer_configs[i-2]
-                            else:
-                                prev_layer_conf = layer_configs[i-1]
-                            model.add_module('linear' + str(i), nn.Linear(prev_layer_conf[0], layer_conf[0]))
-                            if(i < len(layer_configs) - 1):
-                                model.add_module('activation' + str(i), self.activation_dict[layer_conf[1]])
-            else:
-                assert "Input Size Error!"
-            
-            return model.to(self.device)
+                            prev_layer_conf = layer_configs[i-1]
+                        model.add_module('linear' + str(i), nn.Linear(prev_layer_conf[0], layer_conf[0]))
+                        if(i < len(layer_configs) - 1):
+                            model.add_module('activation' + str(i), self.activation_dict[layer_conf[1]])
+
+            # Ensure last layer is a softmax with 10 nodes
+            model.add_module('linear_last', nn.Linear(layer_configs[-1][0], self.target_classes))
+            model.add_module('softmax', nn.Softmax(dim=1))
+        else:
+            assert "Input Size Error!"
+
+        return model.to(self.device)
+
+
+
+
+
+
+
+
 
     def loss_func_and_optimizer(self, model):
         
