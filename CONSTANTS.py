@@ -1,9 +1,9 @@
 ########################################################
 #                   NAS PARAMETERS                     #
 ########################################################
-
+"""
 CONTROLLER_SAMPLING_EPOCHS = 2
-SAMPLES_PER_CONTROLLER_EPOCH = 3
+SAMPLES_PER_CONTROLLER_EPOCH = 2
 CONTROLLER_TRAINING_EPOCHS = 2
 ARCHITECTURE_TRAINING_EPOCHS = 1
 CONTROLLER_LOSS_ALPHA = 0.9
@@ -14,12 +14,14 @@ SAMPLES_PER_CONTROLLER_EPOCH = 10
 CONTROLLER_TRAINING_EPOCHS = 10
 ARCHITECTURE_TRAINING_EPOCHS = 10
 CONTROLLER_LOSS_ALPHA = 0.9
-"""
 
-METHOD = 'random_search' # vanilla constant_baseline random_search
-WEIGHT_SHARING = True  # Set this to True to enable weight sharing
-WEIGHT_SHARING_THRESHOLD = 0.01  # Set this to the minimum accuracy for an architecture to have its weights shared
 
+METHOD = 'random_search' # vanilla adaptive_search random_search
+WEIGHT_SHARING = False  # Set this to True to enable weight sharing
+WEIGHT_SHARING_THRESHOLD = 0.5  # Set this to the minimum accuracy for an architecture to have its weights shared
+
+ADAPTIVE_SEARCH = False
+PREDICTIVE_EARLY_STOPPING = False
 
 ########################################################
 #               CONTROLLER PARAMETERS                  #

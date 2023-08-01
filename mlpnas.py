@@ -24,14 +24,19 @@ class MLPNAS(Controller):
         self.controller_loss_alpha = CONTROLLER_LOSS_ALPHA
         self.weight_sharing = WEIGHT_SHARING
         self.weight_sharing_threshold = WEIGHT_SHARING_THRESHOLD
-
+            
+        self.weight_sharing = WEIGHT_SHARING
+        self.weights_file = 'shared_weights.pkl' # Path to save shared weights
         if self.weight_sharing:
-            self.weights_file = 'shared_weights.pkl'
             if os.path.exists(self.weights_file):
                 with open(self.weights_file, 'rb') as f:
                     self.shared_weights = pickle.load(f)
             else:
+                print("Initializing shared weights dictionary...")
                 self.shared_weights = {}
+
+
+
 
         x = next(iter(data_loader[0]))
         x = torch.as_tensor(x[0])
@@ -44,11 +49,12 @@ class MLPNAS(Controller):
 
         # Find the next available ID for the log file
         nas_data_id = 1
-        while os.path.exists(os.path.join(log_dir, f'nas_data_{nas_data_id}.pkl')):
+        while os.path.exists(os.path.join(log_dir, f'nas_data_{nas_data_id}{"_ws" if self.weight_sharing else ""}.pkl')):
             nas_data_id += 1
 
         # Set the log file path
-        self.nas_data_log = os.path.join(log_dir, f'nas_data_{nas_data_id}.pkl')
+        self.nas_data_log = os.path.join(log_dir, f'nas_data_{nas_data_id}{"_ws" if self.weight_sharing else ""}.pkl')
+
 
         super().__init__()
 
@@ -69,30 +75,26 @@ class MLPNAS(Controller):
             
     def create_architecture(self, sequence):
         model = self.model_generator.create_model(sequence, self.input_shape)
+    
+        if self.weight_sharing: # Check if weight sharing is enabled
+            self.model_generator.set_model_weights(model, sequence) # Transfer shared weights
 
-        if self.weight_sharing:
-            for name, param in model.named_parameters():
-                if name in self.shared_weights:
-                    param.data = self.shared_weights[name]
         return model
 
 
 
-    def train_architecture(self, model):
-        history = self.model_generator.train_model(model, self.data_loader, self.architecture_train_epochs)
-        print("Validation Accuracy:", history['val_accuracy'][-1]) # Debug print
-        print("Weight Sharing Threshold:", self.weight_sharing_threshold) # Debug print
-        print("Weight Sharing Enabled:", self.weight_sharing) # Debug print
+
+
+    def train_architecture(self, model, sequence):
+        history = self.model_generator.train_model(model, self.data_loader, self.architecture_train_epochs, sequence, self.weight_sharing)
+    
         if self.weight_sharing and history['val_accuracy'][-1] >= self.weight_sharing_threshold:
             print("Saving shared weights...") # Debug print
-            for name, param in model.named_parameters():
-                self.shared_weights[name] = param.detach().clone()
-
-            # Save the shared weights to a file
-            with open(self.weights_file, 'wb') as f:
-                pickle.dump(self.shared_weights, f)
+            self.model_generator.update_weights(model, sequence) # Update shared weights
 
         return history
+
+
 
 
 
@@ -180,7 +182,7 @@ class MLPNAS(Controller):
                                      self.custom_loss,
                                      self.controller_train_epochs)
 
-    def search(self):
+    def search(self, test=True):
         vocab = self.vocab_dict()
         valid_ids = list(vocab.keys())
         dropout_id = valid_ids[-2]
@@ -190,7 +192,18 @@ class MLPNAS(Controller):
             print('------------------------------------------------------------------')
             print('                       CONTROLLER EPOCH: {}'.format(controller_epoch))
             print('------------------------------------------------------------------')
-            if METHOD == 'random_search':
+
+            # For testing weight sharing, generate a specific architecture in every second epoch
+            if test:
+                if controller_epoch == 0:
+                    # First architecture for testing
+                    sequence = [14, 2, 30]  # Example architecture 1
+                elif controller_epoch == 1:
+                    # Second architecture for testing (slightly different from the first one)
+                    sequence = [12, 2, 30]  # Example architecture 2
+                sequences = [sequence]
+                log_probs = [0]
+            elif METHOD == 'random_search':
                 # Generate a random architecture sequence that follows the rules
                 sequence = []
                 while len(sequence) < self.max_len:
@@ -206,15 +219,13 @@ class MLPNAS(Controller):
             else:
                 # Sample architecture sequences using the controller model
                 sequences, log_probs = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
-            # Rest of the code...
-
-            # Rest of the code...
 
             rewards = []
             for i, sequence in enumerate(sequences):
                 print('Architecture: ', self.decode_sequence(sequence))
                 model = self.create_architecture(sequence)
-                history = self.train_architecture(model)
+                history = self.train_architecture(model, sequence)
+
                 self.append_model_metrics(sequence, history)
                 print('------------------------------------------------------')
                 # Get the reward for the action
@@ -222,6 +233,7 @@ class MLPNAS(Controller):
                 rewards.append(reward)
                 if self.weight_sharing and history['val_accuracy'][-1] < WEIGHT_SHARING_THRESHOLD:
                     continue
+
             # Calculate the policy loss
             policy_loss = []
             if METHOD == 'vanilla':
@@ -238,12 +250,7 @@ class MLPNAS(Controller):
                 policy_loss.backward()
                 self.controller_optimizer.step()
 
-
         with open(self.nas_data_log, 'wb') as f:
             pickle.dump(self.data, f)
         log_event()
         return self.data
-
-
-
-
