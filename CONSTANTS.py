@@ -1,7 +1,7 @@
 ########################################################
 #                   NAS PARAMETERS                     #
 ########################################################
-
+"""
 CONTROLLER_SAMPLING_EPOCHS = 2
 SAMPLES_PER_CONTROLLER_EPOCH = 3
 CONTROLLER_TRAINING_EPOCHS = 2
@@ -14,7 +14,7 @@ SAMPLES_PER_CONTROLLER_EPOCH = 10
 CONTROLLER_TRAINING_EPOCHS = 10
 ARCHITECTURE_TRAINING_EPOCHS = 10
 CONTROLLER_LOSS_ALPHA = 0.9
-"""
+
 
 METHOD = 'random_search' # vanilla constant_baseline random_search
 WEIGHT_SHARING = True  # Set this to True to enable weight sharing
