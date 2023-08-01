@@ -15,7 +15,6 @@ CONTROLLER_TRAINING_EPOCHS = 10
 ARCHITECTURE_TRAINING_EPOCHS = 10
 CONTROLLER_LOSS_ALPHA = 0.9
 
-
 METHOD = 'random_search' # vanilla adaptive_search random_search
 WEIGHT_SHARING = False  # Set this to True to enable weight sharing
 WEIGHT_SHARING_THRESHOLD = 0.5  # Set this to the minimum accuracy for an architecture to have its weights shared
