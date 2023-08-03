@@ -43,12 +43,14 @@ class Controller(MLPSearchSpace):
             seed = []
             seed_log_probs = []
             while len(seed) < self.max_len:
-                sequence = self.pad_sequence_torch([seed], max_len = self.max_len - 1)
+                sequence = self.pad_sequence_torch([seed], max_len=self.max_len - 1)
                 sequence = sequence.reshape(1, self.max_len - 1)
                 probab = model(torch.as_tensor(sequence, dtype=int).to(self.device))
                 probab = probab[0]
-                next = probab.multinomial(1)
-                next_log_prob = torch.log(probab[next])
+                next_tensor = probab.multinomial(1)
+                next = next_tensor.item()  # Convert tensor to integer
+
+                next_log_prob = torch.log(probab[next_tensor])
                 if next == dropout_id and len(seed) == 0:
                     continue
                 if next == final_layer_id and len(seed) == 0:
@@ -69,6 +71,8 @@ class Controller(MLPSearchSpace):
                 log_probs.append(torch.stack(seed_log_probs).sum())
                 self.seq_data.append(seed)
         return samples, log_probs
+
+
 
 
     def control_model(self):

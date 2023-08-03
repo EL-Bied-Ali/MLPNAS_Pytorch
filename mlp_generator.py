@@ -31,54 +31,65 @@ class PredictiveEarlyStopping:
         :param initial_accuracies: List of validation accuracies for the initial epochs.
         :return: PyTorch tensor representing the features.
         """
+
+        # Pad the sequence with 50 if its length is less than 3
+        while len(sequence) < 3:
+            sequence.append(50)
+
         # Combine the sequence and initial accuracies into a single feature vector
         features = sequence + initial_accuracies
 
         # Convert the features into a PyTorch tensor
-        features_tensor = torch.FloatTensor(features).unsqueeze(0).to(self.device)  # Adding batch dimension
+        features_tensor = torch.FloatTensor(features).unsqueeze(0).unsqueeze(0).to(self.device)  # Adding batch and sequence dimensions
 
         return features_tensor
 
-        def train(self, features_tensor, target):
-            """
-            Trains the predictive model using the given features and target.
 
-            :param features_tensor: PyTorch tensor representing the features.
-            :param target: Target value (final accuracy).
-            :return: Loss value for the training step.
-            """
-            # Forward pass through the LSTM
-            lstm_out, _ = self.model(features_tensor)
-            lstm_out = lstm_out[:, -1, :]  # Take the last output of the sequence
 
-            # Pass the LSTM output through the fully connected layer
-            prediction = self.fc(lstm_out)
 
-            # Compute the loss
-            loss = self.loss_func(prediction, torch.FloatTensor([target]).to(self.device))
 
-            # Perform backpropagation and optimization
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
 
-            return loss.item()
+    def train(self, features_tensor, target):
+        """
+        Trains the predictive model using the given features and target.
 
-        def predict(self, features_tensor):
-            """
-            Predicts the final accuracy using the given features.
+        :param features_tensor: PyTorch tensor representing the features.
+        :param target: Target value (final accuracy).
+        :return: Loss value for the training step.
+        """
+        # Forward pass through the LSTM
+        lstm_out, _ = self.model(features_tensor)
+        lstm_out = lstm_out[:, -1, :]  # Take the last output of the sequence
 
-            :param features_tensor: PyTorch tensor representing the features.
-            :return: Predicted final accuracy.
-            """
-            # Forward pass through the LSTM
-            lstm_out, _ = self.model(features_tensor)
-            lstm_out = lstm_out[:, -1, :]  # Take the last output of the sequence
+        # Pass the LSTM output through the fully connected layer
+        prediction = self.fc(lstm_out)
+        prediction = prediction.squeeze(1)  # Removes the second dimension
+        target_tensor = torch.FloatTensor([target]).to(self.device)
 
-            # Pass the LSTM output through the fully connected layer
-            prediction = self.fc(lstm_out)
+        loss = self.loss_func(prediction, target_tensor)
+
+        # Perform backpropagation and optimization
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
+
+    def predict(self, features_tensor):
+        """
+        Predicts the final accuracy using the given features.
+
+        :param features_tensor: PyTorch tensor representing the features.
+        :return: Predicted final accuracy.
+        """
+        # Forward pass through the LSTM
+        lstm_out, _ = self.model(features_tensor)
+        lstm_out = lstm_out[:, -1, :]  # Take the last output of the sequence
+
+        # Pass the LSTM output through the fully connected layer
+        prediction = self.fc(lstm_out)
         
-            return prediction.item()
+        return prediction.item()
 
 
 
@@ -142,11 +153,6 @@ class MLPSearchSpace(object):
 
 
 
-
-
-
-
-
     def get_config_ids(self, sequence):
         layer_configs = ['input']
         for layer_conf in self.decode_sequence(sequence):
@@ -175,20 +181,23 @@ class MLPSearchSpace(object):
 
 
     def encode_sequence(self, sequence):
-        keys = list(self.vocab.keys())
-        values = list(self.vocab.values())
         encoded_sequence = []
-        for value in sequence:
-            encoded_sequence.append(keys[values.index(value)])
+        for key in sequence:
+            value = self.vocab.get(key)
+            if value is not None:
+                encoded_sequence.append(value)
         return encoded_sequence
+
 
     def decode_sequence(self, sequence):
         keys = list(self.vocab.keys())
         values = list(self.vocab.values())
         decoded_sequence = []
         for key in sequence:
+            # print(f"Debugging decode_sequence: Current key = {key}, type = {type(key)}") # Debug print
             decoded_sequence.append(values[keys.index(key)])
         return decoded_sequence
+
 
 
 class MLPGenerator(MLPSearchSpace):
@@ -206,9 +215,19 @@ class MLPGenerator(MLPSearchSpace):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # print("Target device: " + str(device))
 
-        self.initial_epochs_data = [] # data for the adaptive stop
-
         super().__init__(TARGET_CLASSES)
+
+        self.initial_epochs_data = [] # data for the adaptive stop
+        # Determine the input size for the predictive early stopping model
+        representative_sequence_length = len(self.encode_sequence([
+            (64, 'tanh'),
+            (8, 'tanh'),
+            (10, 'last layer')
+        ]))
+        # input_size = representative_sequence_length + EARLY_STOPPING_PREDICTIVE_EPOCHS
+        input_size = 8
+        # Initialize the Predictive Early Stopping model
+        self.predictive_early_stopping_model = PredictiveEarlyStopping(input_size=input_size, hidden_size=HIDDEN_SIZE, num_layers=NUM_LAYERS)
 
 
     #creating a Pytorch model
@@ -239,12 +258,48 @@ class MLPGenerator(MLPSearchSpace):
                             model.add_module('activation' + str(i), self.activation_dict[layer_conf[1]])
 
             # Ensure last layer is a softmax with 10 nodes
-            model.add_module('linear_last', nn.Linear(layer_configs[-1][0], self.target_classes))
-            model.add_module('softmax', nn.Softmax(dim=1))
+            #model.add_module('linear_last', nn.Linear(layer_configs[-1][0], self.target_classes))
+            #model.add_module('softmax', nn.Softmax(dim=1))
         else:
             assert "Input Size Error!"
 
         return model.to(self.device)
+
+    def extract_features(self, sequence, initial_accuracies):
+        """
+        Extracts features from the encoded sequence and initial accuracies.
+
+        :param sequence: Encoded sequence of the architecture.
+        :param initial_accuracies: List of validation accuracies for the initial epochs.
+        :return: PyTorch tensor representing the features.
+        """
+
+        # Pad the sequence with 50 if its length is less than 3
+        while len(sequence) < 3:
+            sequence.append(50)
+
+        # Take the first 5 accuracies only
+        initial_accuracies = initial_accuracies[:5]
+        # Combine the sequence and initial accuracies into a single feature vector
+        features = sequence + initial_accuracies
+        print("features: ", features)
+
+        # Convert the features into a PyTorch tensor
+        features_tensor = torch.FloatTensor(features).unsqueeze(0).unsqueeze(0).to(self.device)  # Adding batch and sequence dimensions
+
+        return features_tensor
+
+
+    def predict(self, features_tensor):
+        # Forward pass through the LSTM
+        lstm_out, _ = self.predictive_early_stopping_model.model(features_tensor)
+        lstm_out = lstm_out[:, -1, :]  # Take the last output of the sequence
+
+        # Pass the LSTM output through the fully connected layer
+        prediction = self.predictive_early_stopping_model.fc(lstm_out)
+    
+        return prediction.item()
+
 
 
     def loss_func_and_optimizer(self, model):
@@ -260,8 +315,7 @@ class MLPGenerator(MLPSearchSpace):
         return criterion, optimizer
 
 
-    def train_model(self, model, data_loader, nb_epochs, sequence, weight_sharing):
-
+    def train_model(self, model, data_loader, nb_epochs, sequence, weight_sharing, controller_epoch):
         if weight_sharing and sequence:
             self.set_model_weights(model, sequence)
         criterion, optimizer = self.loss_func_and_optimizer(model)
@@ -270,41 +324,37 @@ class MLPGenerator(MLPSearchSpace):
         valid_loader = data_loader[1]
 
         train_losses = []
-        train_accs = []
-        valid_losses = []
         valid_accs = []
 
-        recent_accuracies = [] # List to keep track of recent validation accuracies
-
         t = trange(nb_epochs, desc="Training loss", leave=True)
+
+        pes_model_trained_for_current_architecture = False
 
         for epoch in t:
 
             train_loss_total = 0.0
-    
+
             # ensure model is in training mode
             model.train()    
-            
             for data in train_loader:        
                 inputs, target = data
                 inputs, target = inputs.to(self.device), target.to(self.device)
                 optimizer.zero_grad()   
-                        
+            
                 # forward pass
                 output = model(inputs.view(inputs.shape[0], -1)) # flattening the input image
                 loss = criterion(output, target)
-                
+            
                 # backward pass + run optimizer to update weights
                 loss.backward()
                 optimizer.step()
-            
+        
                 # keep track of loss value
                 train_loss_total += loss.item()
 
             train_losses.append(train_loss_total / len(train_loader)) #average train loss for each epoch  
-            
+        
             # Validation loop
-            # valid_loss_total = 0.0
             model.eval()
             y_true = []
             y_pred = []
@@ -314,32 +364,33 @@ class MLPGenerator(MLPSearchSpace):
 
                 # forward pass
                 output = model(inputs.view(inputs.shape[0], -1)) # flattening the input image
-                
-                # loss = criterion(output, target)
-                # valid_loss_total += loss.item()
-                
+            
                 _, pred = torch.max(output, 1)
                 target = target.cpu().float()
                 y_true.extend(target.tolist()) 
                 y_pred.extend(pred.reshape(-1).tolist())
-            
-            # valid_losses.append(valid_loss_total / len(valid_loader))
-            valid_acc = accuracy_score(y_true, y_pred)
-            valid_accs.append(valid_acc)
+        
+                valid_acc = accuracy_score(y_true, y_pred)
+                valid_accs.append(valid_acc)
 
-            # Collect data for the first N epochs
-            if PREDICTIVE_EARLY_STOPPING and epoch < EARLY_STOPPING_PREDICTIVE_EPOCHS:
-                initial_epochs_data.append(valid_acc)
-            elif PREDICTIVE_EARLY_STOPPING and epoch == EARLY_STOPPING_PREDICTIVE_EPOCHS:
-                # Use the predictive model to make a decision
-                prediction_input = initial_epochs_data + self.encode_sequence(sequence)
-                predicted_final_acc = predictive_model.predict([prediction_input]) # Note: You need to define predictive_model
-                if predicted_final_acc < EARLY_STOPPING_THRESHOLD:
-                    print("Early stopping based on predictive model.")
-                    break
+                if PREDICTIVE_EARLY_STOPPING:
+                    if epoch == EARLY_STOPPING_PREDICTIVE_EPOCHS - 1 and controller_epoch < 10 and not pes_model_trained_for_current_architecture:
+                        print("Training Predictive Early Stopping Model...")
+                        print("INITIAL ACCURACY", valid_accs[:EARLY_STOPPING_PREDICTIVE_EPOCHS])
+                        features_tensor = self.extract_features(sequence, valid_accs[:EARLY_STOPPING_PREDICTIVE_EPOCHS])
+                        target = valid_accs[-1]
+                        loss = self.predictive_early_stopping_model.train(features_tensor, target)
+                        print("Predictive Early Stopping Model Loss:", loss)
+                        pes_model_trained_for_current_architecture = True
+                    elif controller_epoch >= 10:
+                        features_tensor = self.extract_features(sequence, valid_accs[:EARLY_STOPPING_PREDICTIVE_EPOCHS])
+                        prediction = self.predict(features_tensor)
+                        if prediction < EARLY_STOPPING_THRESHOLD:
+                            print("Early stopping based on predictive model.")
+                            break
 
             t.set_description("Training loss = %f val accuracy = %f" % (train_loss_total / len(train_loader), valid_acc))
             t.refresh() # to show immediately the update
 
-        history = {"accuracy": train_accs, "loss": train_losses, "val_accuracy": valid_accs, "val_loss": valid_losses}
+        history = {"loss": train_losses, "val_accuracy": valid_accs}
         return history

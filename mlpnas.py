@@ -3,6 +3,8 @@ from CONSTANTS import *
 from controller import Controller
 from mlp_generator import MLPGenerator
 from utils import *
+from mlp_generator import PredictiveEarlyStopping
+
 
 import pickle
 import torch
@@ -24,7 +26,10 @@ class MLPNAS(Controller):
         self.controller_loss_alpha = CONTROLLER_LOSS_ALPHA
         self.weight_sharing = WEIGHT_SHARING
         self.weight_sharing_threshold = WEIGHT_SHARING_THRESHOLD
+        self.pes_train_mode = True
+        self.all_accuracies = []
             
+        # Weight sharing
         self.weight_sharing = WEIGHT_SHARING
         self.weights_file = 'shared_weights.pkl' # Path to save shared weights
         if self.weight_sharing:
@@ -34,7 +39,6 @@ class MLPNAS(Controller):
             else:
                 print("Initializing shared weights dictionary...")
                 self.shared_weights = {}
-
 
 
 
@@ -70,7 +74,8 @@ class MLPNAS(Controller):
         else:
             self.controller_optimizer = getattr(torch.optim, self.controller_optimizer)(self.controller_model.parameters(), lr=self.controller_lr, weight_decay=self.controller_decay)
 
-
+         
+        self.model_generator = MLPGenerator()  
     
             
     def create_architecture(self, sequence):
@@ -81,18 +86,67 @@ class MLPNAS(Controller):
 
         return model
 
+    # threshold for PES
+    def calculate_threshold(self):
+        sorted_accuracies = sorted(self.all_accuracies, reverse=True)
+        top_20_percent_index = max(1, int(len(sorted_accuracies) * 0.20)) - 1
+        return sorted_accuracies[top_20_percent_index]
 
 
 
 
-    def train_architecture(self, model, sequence):
-        history = self.model_generator.train_model(model, self.data_loader, self.architecture_train_epochs, sequence, self.weight_sharing)
-    
-        if self.weight_sharing and history['val_accuracy'][-1] >= self.weight_sharing_threshold:
-            print("Saving shared weights...") # Debug print
-            self.model_generator.update_weights(model, sequence) # Update shared weights
+    def train_architecture(self, model, sequence, controller_epoch):
+        # Train the model for the specified number of epochs
+        history = self.model_generator.train_model(model, self.data_loader, self.architecture_train_epochs, sequence, self.weight_sharing, controller_epoch)
+        final_val_accuracy = history["val_accuracy"][-1] # Get the final validation accuracy
+        self.all_accuracies.append(final_val_accuracy) # Add it to the list
+        # If we are in the first 10 controller epochs, train the PES model
+        if controller_epoch < 10:
+            print("Training Predictive Early Stopping Model...")
+            initial_accuracies = history['val_accuracy'][:EARLY_STOPPING_PREDICTIVE_EPOCHS]
+            features_tensor = self.model_generator.predictive_early_stopping_model.extract_features(sequence, initial_accuracies)
+            target = history['val_accuracy'][-1]  # Use the final accuracy as the target
+            loss = self.model_generator.predictive_early_stopping_model.train(features_tensor, target)
+            print("Predictive Early Stopping Model Loss:", loss)
+        # If we are after the first 10 controller epochs, use the PES model for predictions
+        elif controller_epoch >= 10:
+            print("Predicting with Predictive Early Stopping Model...")
+            initial_accuracies = history['val_accuracy'][:EARLY_STOPPING_PREDICTIVE_EPOCHS]
+            features_tensor = self.model_generator.predictive_early_stopping_model.extract_features(sequence, initial_accuracies)
+            prediction = self.model_generator.predictive_early_stopping_model.predict(features_tensor)
+            threshold = self.calculate_threshold()  # Calculate the threshold dynamically
+            if prediction < threshold:
+                print("Early stopping based on predictive model.")
+                return history  # Stop training and return the history
 
         return history
+
+
+        """
+        if PREDICTIVE_EARLY_STOPPING and controller_epoch < EARLY_STOPPING_PREDICTIVE_EPOCHS:
+            print("Training Predictive Early Stopping Model...")
+            print("Sequence to encode:", sequence)
+            encoded_sequence = self.model_generator.encode_sequence(sequence)
+            features = encoded_sequence + initial_accuracies
+            features_tensor = self.model_generator.predictive_early_stopping_model.extract_features(sequence, initial_accuracies)
+
+            target = history['val_accuracy'][-1]
+            loss = self.model_generator.predictive_early_stopping_model.train(features_tensor, target)
+            print("Predictive Early Stopping Model Loss:", loss)
+        elif PREDICTIVE_EARLY_STOPPING and controller_epoch >= EARLY_STOPPING_PREDICTIVE_EPOCHS:
+            encoded_sequence = self.model_generator.encode_sequence(sequence) # Calling encode_sequence from MLPGenerator
+            print("Sequence to encode:", sequence)
+            features = encoded_sequence + initial_accuracies
+            features_tensor = self.model_generator.predictive_early_stopping_model.extract_features(sequence, initial_accuracies)
+            prediction = self.model_generator.predictive_early_stopping_model.predict(features_tensor)
+            if prediction < EARLY_STOPPING_THRESHOLD:
+                print("Early stopping based on predictive model.")
+                return history  # Stop training and return the history
+        
+        return history
+        """
+
+
 
 
 
@@ -182,7 +236,7 @@ class MLPNAS(Controller):
                                      self.custom_loss,
                                      self.controller_train_epochs)
 
-    def search(self, test=True):
+    def search(self, test=False):
         vocab = self.vocab_dict()
         valid_ids = list(vocab.keys())
         dropout_id = valid_ids[-2]
@@ -204,18 +258,21 @@ class MLPNAS(Controller):
                 sequences = [sequence]
                 log_probs = [0]
             elif METHOD == 'random_search':
-                # Generate a random architecture sequence that follows the rules
-                sequence = []
-                while len(sequence) < self.max_len:
-                    next = np.random.choice(valid_ids[:-1])  # Exclude final_layer_id from random choice
-                    if next == dropout_id and len(sequence) == 0:
-                        continue  # Skip if first layer is dropout
-                    sequence.append(next)
-                    if len(sequence) == self.max_len - 1:
-                        sequence.append(final_layer_id)  # Add final layer as the last layer
-                        break
-                sequences = [sequence]
-                log_probs = [0]  # log_probs is not used in the random search case, but we'll set it to avoid errors later
+                sequences = []
+                for _ in range(self.samples_per_controller_epoch):
+                    # Generate a random architecture sequence that follows the rules
+                    sequence = []
+                    while len(sequence) < self.max_len:
+                        next = np.random.choice(valid_ids[:-1])  # Exclude final_layer_id from random choice
+                        if next == dropout_id and len(sequence) == 0:
+                            continue  # Skip if first layer is dropout
+                        sequence.append(next)
+                        if len(sequence) == self.max_len - 1:
+                            sequence.append(final_layer_id)  # Add final layer as the last layer
+                            break
+                    sequences.append(sequence)
+                log_probs = [0] * self.samples_per_controller_epoch  # log_probs is not used in the random search case, but we'll set it to avoid errors later
+
             else:
                 # Sample architecture sequences using the controller model
                 sequences, log_probs = self.sample_architecture_sequences(self.controller_model, self.samples_per_controller_epoch)
@@ -224,15 +281,19 @@ class MLPNAS(Controller):
             for i, sequence in enumerate(sequences):
                 print('Architecture: ', self.decode_sequence(sequence))
                 model = self.create_architecture(sequence)
-                history = self.train_architecture(model, sequence)
+                history = self.train_architecture(model, sequence, controller_epoch)
+
+                # If after the 10th controller epoch, switch the PES model to prediction mode
+                if controller_epoch == 10:
+                    self.pes_train_mode = False
 
                 self.append_model_metrics(sequence, history)
                 print('------------------------------------------------------')
-                # Get the reward for the action
-                reward = -history['val_accuracy'][-1] # Assuming that the validation accuracy is stored in the 'val_accuracy' key of the history dictionary
+                reward = -history['val_accuracy'][-1]
                 rewards.append(reward)
                 if self.weight_sharing and history['val_accuracy'][-1] < WEIGHT_SHARING_THRESHOLD:
                     continue
+
 
             # Calculate the policy loss
             policy_loss = []
